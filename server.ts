@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 
 const PORT = 3342;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const MODEL = 'google/gemini-2.5-flash';
+const MODEL = 'google/gemini-3-flash-preview';
 
 const app = express();
 app.use(cors());
@@ -94,7 +94,19 @@ async function captureScreenshot(targetUrl: string): Promise<Buffer> {
 
   try {
     await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: 30_000 });
+    await page.waitForTimeout(600);
+
+    // Scroll through the page to trigger lazy-loaded content
+    const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
+    const step = 800;
+    for (let y = 0; y < scrollHeight; y += step) {
+      await page.evaluate((pos) => window.scrollTo(0, pos), y);
+      await page.waitForTimeout(200);
+    }
+    // Scroll back to top and wait for final paints
+    await page.evaluate(() => window.scrollTo(0, 0));
     await page.waitForTimeout(800);
+
     return await page.screenshot({ type: 'png', fullPage: true });
   } finally {
     await page.close();

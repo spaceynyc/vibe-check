@@ -1,6 +1,6 @@
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useRef } from 'react';
 import type { FormEvent } from 'react';
-import { Sparkles, Flame, WandSparkles, TriangleAlert, CheckCircle2, ClipboardCopy, Check } from 'lucide-react';
+import { Sparkles, Flame, WandSparkles, TriangleAlert, CheckCircle2, ClipboardCopy, Check, Upload, Globe } from 'lucide-react';
 
 type ScoreKey = 'palette' | 'typography' | 'layout' | 'originality' | 'overallVibe';
 
@@ -75,11 +75,23 @@ Based on this analysis, please suggest specific code changes to improve the weak
 }
 
 export default function App() {
+  const [mode, setMode] = useState<'url' | 'upload'>('url');
   const [url, setUrl] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  function handleFileChange(file: File | null) {
+    if (!file) return;
+    setImageFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setImagePreview(reader.result as string);
+    reader.readAsDataURL(file);
+  }
 
   const handleCopyPrompt = useCallback(() => {
     if (!result) return;
@@ -102,11 +114,30 @@ export default function App() {
 
     try {
       const API_BASE = import.meta.env.VITE_API_URL || '';
-      const response = await fetch(`${API_BASE}/api/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      });
+      let response: Response;
+
+      if (mode === 'upload' && imageFile) {
+        const reader = new FileReader();
+        const base64 = await new Promise<string>((resolve) => {
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(',')[1]);
+          };
+          reader.readAsDataURL(imageFile);
+        });
+
+        response = await fetch(`${API_BASE}/api/analyze-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: base64, mimeType: imageFile.type }),
+        });
+      } else {
+        response = await fetch(`${API_BASE}/api/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url }),
+        });
+      }
 
       const payload = (await response.json()) as AnalysisResponse | { error: string };
       if (!response.ok) {
@@ -139,25 +170,86 @@ export default function App() {
         </header>
 
         <section className="mx-auto w-full max-w-3xl rounded-3xl border border-zinc-800 bg-zinc-900/80 p-4 shadow-2xl shadow-black/50 backdrop-blur md:p-5">
-          <form className="flex flex-col gap-3 md:flex-row" onSubmit={handleSubmit}>
-            <label htmlFor="url" className="sr-only">
-              Website URL
-            </label>
-            <input
-              id="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://your-questionable-design.com"
-              required
-              className="w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-5 py-4 text-base text-zinc-100 outline-none ring-0 transition focus:border-zinc-500"
-            />
+          <div className="mb-3 flex gap-1 rounded-xl bg-zinc-950 p-1">
             <button
-              type="submit"
-              disabled={isLoading}
-              className="cursor-pointer rounded-2xl bg-zinc-100 px-7 py-4 font-medium text-zinc-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-70"
+              type="button"
+              onClick={() => setMode('url')}
+              className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition ${
+                mode === 'url' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
             >
-              {isLoading ? 'Judging...' : 'Judge it'}
+              <Globe className="h-4 w-4" /> URL
             </button>
+            <button
+              type="button"
+              onClick={() => setMode('upload')}
+              className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition ${
+                mode === 'upload' ? 'bg-zinc-800 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+              }`}
+            >
+              <Upload className="h-4 w-4" /> Upload
+            </button>
+          </div>
+
+          <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
+            {mode === 'url' ? (
+              <div className="flex flex-col gap-3 md:flex-row">
+                <label htmlFor="url" className="sr-only">Website URL</label>
+                <input
+                  id="url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="https://your-questionable-design.com"
+                  required={mode === 'url'}
+                  className="w-full rounded-2xl border border-zinc-700 bg-zinc-950 px-5 py-4 text-base text-zinc-100 outline-none ring-0 transition focus:border-zinc-500"
+                />
+                <button
+                  type="submit"
+                  disabled={isLoading}
+                  className="cursor-pointer rounded-2xl bg-zinc-100 px-7 py-4 font-medium text-zinc-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {isLoading ? 'Judging...' : 'Judge it'}
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => handleFileChange(e.target.files?.[0] ?? null)}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    handleFileChange(e.dataTransfer.files?.[0] ?? null);
+                  }}
+                  className="flex cursor-pointer flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-zinc-700 bg-zinc-950 px-5 py-8 text-zinc-400 transition hover:border-zinc-500 hover:text-zinc-300"
+                >
+                  <Upload className="h-6 w-6" />
+                  {imageFile ? (
+                    <span className="text-sm text-zinc-200">{imageFile.name}</span>
+                  ) : (
+                    <span className="text-sm">Drop a screenshot or click to upload</span>
+                  )}
+                </button>
+                {imagePreview && (
+                  <img src={imagePreview} alt="Preview" className="max-h-40 rounded-xl border border-zinc-800 object-contain" />
+                )}
+                <button
+                  type="submit"
+                  disabled={isLoading || !imageFile}
+                  className="cursor-pointer rounded-2xl bg-zinc-100 px-7 py-4 font-medium text-zinc-900 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {isLoading ? 'Judging...' : 'Judge it'}
+                </button>
+              </div>
+            )}
           </form>
           {error && <p className="mt-3 text-sm text-rose-300">{error}</p>}
         </section>

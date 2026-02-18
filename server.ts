@@ -10,7 +10,7 @@ const MODEL = 'google/gemini-3-flash-preview';
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 const ANALYSIS_PROMPT = `You are a ruthless but fair web design critic.
 Analyze the provided website screenshot and return only valid JSON matching this exact shape:
@@ -40,7 +40,8 @@ Scoring rules:
 - 1-3 = rough, 4-6 = mid, 7-10 = strong.
 - Be specific and visually grounded in the screenshot.
 - Detect obvious "AI slop" patterns (generic gradients, stock hero sameness, bland copy blocks, template overuse, weak hierarchy).
-- Keep tone witty and direct, but useful.
+- Keep tone witty, sarcastic, and roast-like throughout — including the overallAssessment. Never drop into dry corporate-review mode. The overallAssessment should read like a comedian doing design critique, not a consulting firm's report.
+- Even when a site scores well, find something to roast. Nobody gets a free pass.
 - Output JSON only, no markdown, no commentary.`;
 
 type AnalysisResult = {
@@ -192,6 +193,72 @@ app.post('/api/analyze', async (req, res) => {
     return res.json({
       url: normalized.toString(),
       screenshotBase64: `data:image/png;base64,${base64}`,
+      analysis,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unexpected error';
+    return res.status(500).json({ error: message });
+  }
+});
+
+app.post('/api/analyze-image', async (req, res) => {
+  const { imageBase64, mimeType } = req.body as { imageBase64?: string; mimeType?: string };
+
+  if (!imageBase64 || typeof imageBase64 !== 'string') {
+    return res.status(400).json({ error: 'imageBase64 is required' });
+  }
+
+  if (!OPENROUTER_API_KEY) {
+    return res.status(500).json({ error: 'OPENROUTER_API_KEY is missing in environment' });
+  }
+
+  const mime = mimeType || 'image/png';
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://vibe-check.spaceynyc.dev',
+        'X-Title': 'Vibe Check',
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 1600,
+        messages: [
+          { role: 'system', content: ANALYSIS_PROMPT },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Analyze this screenshot/design for aesthetics and design quality.',
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:${mime};base64,${imageBase64}`,
+                },
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`OpenRouter error ${response.status}: ${err}`);
+    }
+
+    const data = await response.json() as { choices: { message: { content: string } }[] };
+    const text = data.choices?.[0]?.message?.content ?? '';
+    const analysis = safeParseJson(text);
+
+    return res.json({
+      url: 'uploaded image',
+      screenshotBase64: `data:${mime};base64,${imageBase64}`,
       analysis,
     });
   } catch (error) {

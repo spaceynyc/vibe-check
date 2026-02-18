@@ -97,14 +97,14 @@ async function captureScreenshot(targetUrl: string): Promise<Buffer> {
     await page.waitForTimeout(600);
 
     // Scroll through the page to trigger lazy-loaded content
-    const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
+    const scrollHeight = await page.evaluate('document.body.scrollHeight') as number;
     const step = 800;
     for (let y = 0; y < scrollHeight; y += step) {
-      await page.evaluate((pos) => window.scrollTo(0, pos), y);
+      await page.evaluate(`window.scrollTo(0, ${y})`);
       await page.waitForTimeout(200);
     }
     // Scroll back to top and wait for final paints
-    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.evaluate('window.scrollTo(0, 0)');
     await page.waitForTimeout(800);
 
     return await page.screenshot({ type: 'png', fullPage: true });
